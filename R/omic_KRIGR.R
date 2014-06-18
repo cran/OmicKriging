@@ -25,7 +25,30 @@
 #' @references Cressie 1993 Statistics for Spatial Data p.154
 #'
 #' @export
-okriging <- function(idtest,idtrain=NULL,corlist,H2vec,pheno,phenoname,Xcova=NULL){
+#' @examples
+#'   ## load phenotype data used in vignette
+#'   phenotypeFile <- system.file(package = "OmicKriging",
+#'                                "doc/vignette_data/ig_pheno.txt")
+#'   phenotypeData <- load_sample_data(phenotypeFile, 'igrowth')
+#'   ## load GRM used in vignette
+#'   binaryFile <- system.file(package = "OmicKriging",
+#'                             "doc/vignette_data/ig_genotypes.grm.bin")
+#'   binaryFileBase <- substr(binaryFile,1, nchar(binaryFile) - 4)
+#'   grmMat <- read_GRMBin(binaryFileBase)
+#'   ## pull a subset of samples to train the model
+#'   trainingSet <- phenotypeData$IID[11:nrow(phenotypeData)]
+#'   ## predict phenotype in the remaining samples
+#'   testSet <- phenotypeData$IID[1:10]
+#'   ## compute preducted values for a subset of samples
+#'   prediction <- okriging(idtest=testSet,
+#'                          idtrain=trainingSet,
+#'                          corlist=list(grmMat),
+#'                          H2vec=c(1),
+#'                          pheno=phenotypeData,
+#'                          phenoname='igrowth')
+#'   ## summarize the prediction! (Note, that this is a toy example)
+#'   summary(lm(prediction$Ypred ~ prediction$Ytest))
+okriging <- function(idtest, idtrain=NULL, corlist, H2vec, pheno, phenoname, Xcova=NULL){
   idtest <- as.character(idtest)
   idtrain <- as.character(idtrain)
   nt <- length(idtest)
@@ -74,10 +97,10 @@ okriging <- function(idtest,idtrain=NULL,corlist,H2vec,pheno,phenoname,Xcova=NUL
 
 #' Multithreaded cross validation routine for Omic Kriging.
 #'
-#' This is a flexible cross validation routine which wraps the Omic Kriging
+#' This is a flexible cross validation routine that wraps the Omic Kriging
 #' calculation. The user can specify the size of the test set, all the way to
 #' "Leave One Out" cross validation. Additionally, all relevant  parameters in the
-#' \code{\link{okriging}} function are exposed. This function uses the doMC
+#' \code{\link{okriging}} function are exposed. This function uses the doParallel
 #' package to distribute computation over multiple cores. If the phenotype is 
 #' case/control, a ROCR AUC and GLM analysis is run and the results printed to screen.
 #'
@@ -102,12 +125,37 @@ okriging <- function(idtest,idtrain=NULL,corlist,H2vec,pheno,phenoname,Xcova=NUL
 #'
 #' @keywords prediction, cross validation
 #'
-#' @include R/omic_KRIGR.R
+#' @include omic_KRIGR.R
 #'
-#' @import doMC
+#' @import doParallel
 #' @import ROCR
 #' @export
-krigr_cross_validation <- function(cor.list, pheno.df, pheno.id = 1, h2.vec, covar.mat = NULL, nfold = 10, ncore = "all", verbose = FALSE, ...) {
+#' @examples
+#'  ## run a simplified version of the vignette
+#'  ## load phenotype data
+#'  phenotypeFile <- system.file(package = "OmicKriging",
+#'                               "doc/vignette_data/ig_pheno.txt")
+#'  phenotypeData <- load_sample_data(phenotypeFile, 'igrowth')
+#'  ## load GRM used in vignette
+#'  binaryFile <- system.file(package = "OmicKriging",
+#'                            "doc/vignette_data/ig_genotypes.grm.bin")
+#'  binaryFileBase <- substr(binaryFile,1, nchar(binaryFile) - 4)
+#'  grmMat <- read_GRMBin(binaryFileBase)
+#'  ## load Genetic Relatedness Matrix (GRM)
+#'  ## generate predictions using cross validation across a single core
+#'  result <- krigr_cross_validation(pheno.df = phenotypeData,
+#'                                   cor.list = list(grmMat),
+#'                                   h2.vec = c(1),
+#'                                   ncore = 1,
+#'                                   nfold = 2)
+krigr_cross_validation <- function(cor.list,
+                                   pheno.df,
+                                   pheno.id = 1,
+                                   h2.vec,
+                                   covar.mat = NULL,
+                                   nfold = 10,
+                                   ncore = "all",
+                                   verbose = FALSE, ...) {
   ## dependencies
   ## functions
   '%&%' <- function(a, b) paste(a, b, sep="")
@@ -122,11 +170,14 @@ krigr_cross_validation <- function(cor.list, pheno.df, pheno.id = 1, h2.vec, cov
   ## detect cores  
   if(ncore == "all") {
     ncore <- detectCores()
-    registerDoMC(cores = ncore)
-    } else {
-    registerDoMC(cores = ncore)
-    }
+  } else if (!is.numeric(ncore)) {
+    stop("ncore supplied must either be numeric or the string \"all\".")
+  }
   
+  ## register cluster
+  clust <- makeCluster(ncore)
+  registerDoParallel(clust)
+
   ## set n-fold  
   if(nfold == "LOOCV") {
     nfold <- n.samples
@@ -166,7 +217,7 @@ krigr_cross_validation <- function(cor.list, pheno.df, pheno.id = 1, h2.vec, cov
   n.par <- unique(rand.groups)
   i <- 0 ## added i to the functions namespace so that R CMD Check catches it
   time <- system.time(
-    res <- foreach(i = 1:length(n.par), .combine = rbind) %dopar% {
+    res <- foreach(i = 1:length(n.par), .combine = rbind, .export = ls(envir=globalenv())) %dopar% {
       if (verbose) cat(n.par[i], "\n")
       flush.console()
     

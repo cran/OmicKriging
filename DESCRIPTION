@@ -1,7 +1,7 @@
 Package: OmicKriging
 Type: Package
 Title: OmicKriging for Phenotypic Prediction
-Version: 1.1
+Version: 1.3
 Date: 2013-09-26
 Author: Hae Kyung Im, Heather E. Wheeler, Keston Aquino Michaels, Vassily
     Trubetskoy
@@ -17,10 +17,10 @@ Description: This package provides functions to generate a correlation matrix
     simply scaled correlation) between a dependent variable Y and independent
     variables X, it uses known correlation between X and Y to predict Y.
 License: GPL (>= 3)
-Depends: R(>= 2.15.1), SNPRelate, doMC
-Imports: ROCR, inline, gdsfmt, irlba, Rcpp, RcppEigen
-Collate: 'input_pheno_GT.R' 'omic_KRIGR.R' 'correlation_matrices.R'
-Packaged: 2014-01-22 16:19:12 UTC; vasya
+Depends: R(>= 2.15.1), doParallel,
+Imports: ROCR, irlba
+Collate: 'correlation_matrices.R' 'input_pheno_GT.R' 'omic_KRIGR.R'
+Packaged: 2014-06-17 15:56:33 UTC; vasya
 NeedsCompilation: no
 Repository: CRAN
-Date/Publication: 2014-02-01 07:59:52
+Date/Publication: 2014-06-18 15:01:15

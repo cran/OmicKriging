@@ -1,58 +1,3 @@
-#' Compute genetic correlation matrix from PLINK binary files.
-#'
-#' This is a convenience function which produces a centered genetic correlation
-#' matrix from SNPs loaded into a Genomic Data Structure (GDS) file. The resulting matrix can be used 
-#' with the okriging function. The GRM can be saved to disk as a
-#' R object for fast loading downstream. The genotype  matrix is z-score normalized (i.e.
-#' column means are centered and column variance is divided out to unit variance)
-#' prior to calculating the correlation matrix.
-#'
-#' @param gdsFile File holding the GDS from which to pull the raw genotype matrix.
-#' @param grmFilePrefix File to store the resulting GRM on disk as an R object.
-#' @param snpList A vector of SNP IDs to subset the GRM on.
-#' @param sampleList A vector of sample IDs to subset the GRM on.
-#'
-#' @return A genetic correlation matrix with colnames and rownames set to sample IDs.
-#'   Each entry in the matrix is of type 'double'.
-#'
-#' @import gdsfmt
-#' @import SNPRelate
-#' @import RcppEigen
-#'
-#' @keywords input, GRM
-#' @export
-make_GRM <- function(gdsFile = NULL, grmFilePrefix = NULL, snpList = NULL, sampleList = NULL) {
-
-  genofile <- openfn.gds(gdsFile)
-  ## pull an integer dosage matrix from the GDS. Rows are samples, columns are SNPs, and missing values are int 3.
-  X <- snpgdsGetGeno(gdsobj = genofile, sample.id = sampleList, snp.id = snpList, verbose = FALSE)
-  ## set missing values (int 3) to properly missing
-  X[X == 3] <- NA
-  ## z-normalize matrix (sweep out column means, and divide out column matrices)
-  X <- scale(X, center = TRUE, scale = TRUE)
-  ## set missing values to new column mean, i.e. 0.0
-  X[is.na(X)] <- 0.0
-  grm <- rcppcormat(t(X))
-  
-  ## pull sample IDs unless a sample list is specified
-  if(!is.null(sampleList)) {
-    sample.ids <- sampleList
-  } else {
-    sample.ids <- read.gdsn(index.gdsn(genofile, "sample.id"))
-  }
-
-  ## annotate columns and rows with sample IDs
-  colnames(grm) <- sample.ids
-  rownames(grm) <- sample.ids
-
-  ## write out the GRM if a file is specified
-  if(!is.null(grmFilePrefix)) {
-    write_GRMBin(X = grm, prefix = grmFilePrefix)
-  }
-
-  return(grm)
-}
-
 #' Compute gene expression correlation matrix.
 #'
 #' This function computes a gene expression correlation matrix given a file of
@@ -68,10 +13,16 @@ make_GRM <- function(gdsFile = NULL, grmFilePrefix = NULL, snpList = NULL, sampl
 #'   rownames and colnames as sample IDs.
 #'
 #' @export
+#' @examples
+#'  ## load gene expression values from vignette
+#'  expressionFile <- system.file(package = "OmicKriging",
+#'                      "doc/vignette_data/ig_gene_subset.txt.gz")
+#'  ## compute correlation matrix
+#'  geneCorrelationMatrix <- make_GXM(expressionFile)
 make_GXM <- function(expFile = NULL, gxmFilePrefix = NULL, idfile = NULL) {
 
   ## data input
-  genedata <- read.delim(expFile, sep="", as.is=T, header=T)
+  genedata <- read.delim(expFile, sep=" ", as.is=T, header=T)
   if(!is.null(idfile)) {
     iddata <- read.table(idfile,header=T,as.is=T)
     genedata <- merge(iddata,genedata,by.x=c("FID","IID"),by.y=c("FID","IID"))
@@ -86,7 +37,7 @@ make_GXM <- function(expFile = NULL, gxmFilePrefix = NULL, idfile = NULL) {
   genemat[is.na(genemat)] <- 0.0
    
   ## compute cor mat
-  cormat <- rcppcormat(t(genemat))
+  cormat <- cor(t(genemat))
   
   ## give it row names
   colnames(cormat) <- cordata.id[,2]
@@ -99,39 +50,12 @@ make_GXM <- function(expFile = NULL, gxmFilePrefix = NULL, idfile = NULL) {
   return(cormat)
 }
 
-#' Run Principal Component Analysis (PCA) using the Genomic Data Structure (GDS).
-#'
-#' An efficient method for computing Principal Components using the Genomic Data
-#' Structure (GDS). This is a convenience wrapper for functions from the 
-#' SNPRelate package.
-#'
-#' @param gdsFile A Genomic Data Structure file describing your study.
-#' @param n.top Number of top principal components to return. Defaults to
-#'   returning all components (i.e. # of samples).
-#' @param n.core Distrubute computation across N cores.
-#'
-#' @return A matrix of Principal Components of dimension (# of samples) x
-#'   (n.top).
-#'
-#' @keywords covariate, PCA, GRM
-#'
-#' @import SNPRelate
-#'
-#' @export
-make_PCs_gds <- function(gdsFile, n.core, n.top = 0) {
-
-  gds <- openfn.gds(gdsFile)
-  pca <- snpgdsPCA(gds, num.thread = n.core)
-  rownames(pca$eigenvect) <- read.gdsn(index.gdsn(gds, "sample.id"))
-  return( pca$eigenvect )
-}
-
 #' Run Principal Component Analysis (PCA) using base R svd() function.
 #'
 #' A simple wrapper around the base R svd() function which returns the top N
 #' eigenvectors of a matrix. Use this function to generate covariates for use
 #' with the \code{\link{okriging}} or \code{\link{krigr_cross_validation}}
-#' functions.
+#' functions. This wrapper preserves the rownames of the original matrix.
 #'
 #' @param X A correlation matrix.
 #' @param n.top Number of top principal compenents to return 
@@ -142,10 +66,19 @@ make_PCs_gds <- function(gdsFile, n.core, n.top = 0) {
 #'
 #' @keywords covariate, PCA, GRM
 #' @export
+#' @examples
+#'  ## compute PC's using the  gene expression correlation matrix from vignette
+#'  ## load gene expression values from vignette
+#'  expressionFile <- system.file(package = "OmicKriging",
+#'                      "doc/vignette_data/ig_gene_subset.txt.gz")
+#'  ## compute correlation matrix
+#'  geneCorrelationMatrix <- make_GXM(expressionFile)
+#'  ## find top ten PC's of this matrix using SVD
+#'  topPcs <- make_PCs_svd(geneCorrelationMatrix, n.top=10) 
 make_PCs_svd <- function(X, n.top = 2) {
   res <- La.svd(X, nu = n.top)
-  rownames(res) <- rownames(X)
-  return(res["u"])
+  rownames(res["u"][[1]]) <- rownames(X)
+  return(res["u"][[1]])
 }
 
 #' Run Principal Component Analysis (PCA) using the irlba package.
@@ -169,72 +102,21 @@ make_PCs_svd <- function(X, n.top = 2) {
 #'
 #' @import irlba
 #' @export
+#' @examples
+#'  ## compute PC's using the  gene expression correlation matrix from vignette
+#'  ## load gene expression values from vignette
+#'  expressionFile <- system.file(package = "OmicKriging",
+#'                      "doc/vignette_data/ig_gene_subset.txt.gz")
+#'  ## compute correlation matrix
+#'  geneCorrelationMatrix <- make_GXM(expressionFile)
+#'  ## find top ten PC's of this matrix using SVD
+#'  topPcs <- make_PCs_irlba(geneCorrelationMatrix, n.top=10) 
 make_PCs_irlba <- function(X, n.top = 2) {
-  
   res <- irlba(X, nu = n.top)
   rownames(res$u) <- rownames(X)
   return(res$u)
 }
 
-#' Compute a correlation matrix.
-#'
-#' This function computes a correlation matrix using a cross product. It is
-#' implemented in C++ for performance. This function is compiled and called
-#' from R using the Rcpp package.
-#'
-#' @param snpmat A centered SNP matrix containing fields of type 'double'.
-#'
-#' @return An n x n correlation matrix.
-#'
-#' @importFrom inline cxxfunction
-#' @import Rcpp
-#'
-#' @keywords c++, performance, correlation matrix
-rcppcormat <- function(snpmat){
-    ## rcpp
-    crossprodCpp <- '
-    using Eigen::Map;
-    using Eigen::MatrixXd;
-    using Eigen::Lower;
-
-    // set constants
-
-    const Map<MatrixXd> A(as<Map<MatrixXd> >(AA));
-    const int n(A.cols());
-
-    // create n x n matrix
-
-    MatrixXd AtA(MatrixXd(n, n)
-
-    // zero out the matrix
-
-    .setZero()
-
-    // treat what follows as symmetric matrix, use lower
-
-    .selfadjointView<Lower>()
-
-    // sum of B + AA
-
-    .rankUpdate(A.adjoint()));
-
-    // return
-
-    return wrap(AtA);
-    '
-  
-    ## compile the cross product function
-    cpcpp <- cxxfunction(signature(AA="matrix"), crossprodCpp,
-    plugin="RcppEigen", verbose=FALSE)
-
-    cormat <- cpcpp(snpmat)
-
-    ## post work
-    cormatdiag <- diag(cormat)
-    cormat <- sweep(cormat, 1:2, cormatdiag, "/")
-    return(cormat)
-
-}
 
 #' Read the GRM binary file.
 #'
@@ -245,6 +127,9 @@ rcppcormat <- function(snpmat){
 #' sample IDs to colnames and rownames for compatibility with other Kriging 
 #' functions.
 #'
+#' Note that the GRM is described by three files, and this function assumes that all
+#' have a common prefix that is passed in.
+#'
 #' @param prefix The file path prefix to GRM binary files (e.g., test.grm.bin, test.grm.N.bin, test.grm.id.)
 #' @param size The length (in bytes) of each value in the raw GRM vector. Default is 4, and matches GRM writen by GCTA 1.11.
 #'
@@ -253,15 +138,21 @@ rcppcormat <- function(snpmat){
 #' @references http://www.complextraitgenomics.com/software/gcta/estimate_grm.html
 #'
 #' @export
+#' @examples
+#'   ## read binary Genetic Relatedness Matrix (GRM) generated by GCTA
+#'   grmFile <- system.file(package = "OmicKriging",
+#'                          "doc/vignette_data/ig_genotypes.grm.bin")
+#'   grmFileBase <- substr(grmFile,1, nchar(grmFile) - 4)
+#'   GRM <- read_GRMBin(grmFileBase)
 read_GRMBin <- function(prefix, size = 4){
   sum_i <- function(i){
     return(sum(1:i))
   }
 
   ## open file connections and read in data
-  BinFileName <- paste(prefix,".grm.bin",sep="")
-  NFileName <- paste(prefix,".grm.N.bin",sep="")
-  IDFileName <- paste(prefix,".grm.id",sep="")
+  BinFileName <- paste(prefix,".bin",sep="")
+  NFileName <- paste(prefix,".N.bin",sep="")
+  IDFileName <- paste(prefix,".id",sep="")
   id <- read.table(IDFileName)
   n <- dim(id)[1]
   BinFile <- file(BinFileName, "rb")
@@ -310,6 +201,17 @@ read_GRMBin <- function(prefix, size = 4){
 #' @references http://www.complextraitgenomics.com/software/gcta/estimate_grm.html
 #'
 #' @export
+#' @examples
+#'   
+#'   ## create a random genotype matrix
+#'   nSamples <- 10
+#'   mMarkers <- 100
+#'   X <- matrix(rbinom(n=100, size=2, prob=0.5), nrow=nSamples)
+#'   ## compute the Genetric Relatedness Matrix
+#'   grm <- cor(X)
+#'   ## write a Genetic Relatedness Matrix (GRM)
+#'   ## NOTE: to following is not run here -- not writing any files in examples
+#'   #write_GRMBin(grm, n.snps=mMarkers, prefix="grm.out")
 write_GRMBin <- function(X, n.snps = 0.0, prefix, size = 4) {
 
   sum_i <- function(i){

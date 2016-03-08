@@ -12,12 +12,8 @@
 #'
 #' @keywords input
 #'
+#' @importFrom utils read.table
 #' @export
-#' @examples
-#'   ## load phenotype data used in vignette
-#'   phenotypeFile <- system.file(package = "OmicKriging",
-#'                                "doc/vignette_data/ig_pheno.txt")
-#'   phenotypes <- load_sample_data(phenoFile=phenotypeFile, main.pheno="igrowth")
 load_sample_data <- function(phenoFile, main.pheno) {
 
   ## TODO:: make columns numeric when they can reasonably be converted into numeric
